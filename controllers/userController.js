@@ -1,5 +1,15 @@
 const User = require("../models/User");
 
+exports.getProfile = async (req, res) => {
+  const { id : userId } = req.user;
+  try {
+    const user = await User.findById(userId);
+    res.status(200).json(user);
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+}
+
 exports.followUser = async (req, res) => {
   const { id: userId } = req.user;  // using `id` from JWT payload
   const { id: followId } = req.params;
