@@ -1,7 +1,7 @@
-// Only import Post once
 const Post = require('../models/Post');
 const User = require('../models/User');
 const transporter = require('../config/nodemailer');
+
 
 // Create Post
 exports.createPost = async (req, res) => {
@@ -19,8 +19,6 @@ exports.createPost = async (req, res) => {
       content,
       mediaUrl,
     });
-
-    console.log("User ID:", userId);
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ msg: "User not found." });
@@ -43,14 +41,14 @@ exports.createPost = async (req, res) => {
     res.status(201).json(post);
   } catch (err) {
     console.error("Error creating post:", err);
-    res.status(500).json({ msg: "Error creating post.", error: err.message });
+    res.status(500).json({ message: 'Server error', error: JSON.stringify(err) });
   }
 };
 
 // Like a Post
 exports.likePost = async (req, res) => {
   const { id: userId } = req.user;
-  const { postId } = req.params;
+  const { id: postId } = req.params;
 
   try {
     const post = await Post.findById(postId);
@@ -58,17 +56,38 @@ exports.likePost = async (req, res) => {
 
     if (!post.likes.includes(userId)) {
       post.likes.push(userId);
-      await post.save();
+    } else {
+      // Unlike the post if already liked
+      post.likes = post.likes.filter(like => like.toString() !== userId);
     }
 
-    res.json({ msg: "Post liked!" });
+    await post.save();
+    res.json({ msg: post.likes.includes(userId) ? "Post liked!" : "Post unliked!" });
   } catch (err) {
-    console.error("Error liking post:", err);
-    res.status(500).json({ msg: "Error liking post.", error: err.message });
+    console.error("Error liking/unliking post:", err);
+    res.status(500).json({ msg: "Error processing like.", error: err.message });
   }
 };
 
-// Get Feed
+exports.unlikePost = async (req, res) => {
+  const { id: userId } = req.user;
+  const { id: postId } = req.params;
+
+  try {
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ msg: "Post not found" });
+
+    post.likes = post.likes.filter(like => like.toString() !== userId);
+    await post.save();
+
+    res.json({ msg: "Post unliked!" });
+  } catch (err) {
+    res.status(500).json({ msg: "Error unliking post", error: err.message });
+  }
+};
+
+
+// Get Feed (Posts from users you follow)
 exports.getFeed = async (req, res) => {
   const { id: userId } = req.user;
 
@@ -91,11 +110,25 @@ exports.getFeed = async (req, res) => {
 exports.deletePost = async (req, res) => {
   try {
     const postId = req.params.id;
-    const post = await Post.findByIdAndDelete(postId);
 
+    // Find the post
+    const post = await Post.findById(postId);
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
+
+    // Ensure the user deleting the post is the author
+    if (post.author.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Unauthorized to delete this post' });
+    }
+
+    // Remove the post from the user's posts array
+    await User.findByIdAndUpdate(post.author, {
+      $pull: { posts: postId }
+    });
+
+    // Delete the post
+    await post.deleteOne();
 
     res.status(200).json({ message: 'Post deleted successfully' });
   } catch (error) {
@@ -103,17 +136,23 @@ exports.deletePost = async (req, res) => {
   }
 };
 
-
-// Get all posts
+// Get all posts by the user and their followers
 exports.getAllPosts = async (req, res) => {
-  
   const { id: userId } = req.user;
 
   try {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ msg: "User not found" });
 
-    const posts = await Post.find({ author: user })
+    // Fetch posts from the user and their followers
+    const posts = await Post.find({
+      $or: [
+        { author: userId },
+        { author: { $in: user.following } }
+      ]
+    })
+      .populate("author", "username")
+      .sort({ createdAt: -1 });
 
     res.status(200).json(posts);
   } catch (err) {
@@ -121,3 +160,23 @@ exports.getAllPosts = async (req, res) => {
     res.status(500).json({ msg: "Error getting posts.", error: err.message });
   }
 };
+
+
+exports.getLikes = async (req, res) => {
+  const { id: userId } = req.user;
+  const { id: postId } = req.params;
+  try {
+    const post = await Post.findById(postId);
+    
+    if (!post) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+    
+    const numberOfLikes = post.likes.length;
+
+    return res.status(200).json({likes: numberOfLikes});
+  } catch (err) {  
+    console.error("Error getting all posts:", err);
+    res.status(500).json(err.message);
+  }
+}

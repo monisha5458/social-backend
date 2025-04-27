@@ -56,3 +56,55 @@ exports.unfollowUser = async (req, res) => {
     res.status(500).json({ msg: err.message });
   }
 };
+// at the bottom of your existing exports:
+exports.searchUsers = async (req, res) => {
+  const { q } = req.query;                // ?q=someName
+  try {
+    if (!q) return res.status(400).json({ msg: "Query param `q` is required" });
+    // case-insensitive partial match on username
+    const users = await User.find({
+      username: { $regex: q, $options: "i" }
+    }).select("_id username");
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+};
+
+exports.likePost = async (req, res) => {
+  const { id: userId } = req.user;
+  const { id: postId } = req.params;
+
+  try {
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ msg: "Post not found" });
+
+    if (!post.likes.includes(userId)) {
+      post.likes.push(userId);
+      await post.save();
+    }
+
+    res.json({ msg: "Post liked" });
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+};
+
+exports.unlikePost = async (req, res) => {
+  const { id: userId } = req.user;
+  const { id: postId } = req.params;
+
+  try {
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ msg: "Post not found" });
+
+    post.likes = post.likes.filter((likeId) => likeId.toString() !== userId);
+    await post.save();
+
+    res.json({ msg: "Post unliked" });
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+};
+
+
